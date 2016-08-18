@@ -1,4 +1,5 @@
 # Akamai G2O module for Nginx
+## nginx_mod_akamai_g2o [![Build Status](https://travis-ci.org/kaltura/nginx_mod_akamai_g2o.svg?branch=master)](https://travis-ci.org/kaltura/nginx_mod_akamai_g2o)
 
 Controls access to content from Akamai edge servers, using the G2O headers: `X-Akamai-G2O-Auth-Data` and `X-Akamai-G2O-Auth-Sign`.
 
