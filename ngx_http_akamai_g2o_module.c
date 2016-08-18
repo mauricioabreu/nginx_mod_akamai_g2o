@@ -20,15 +20,15 @@ enum {
 };
 
 typedef struct {
-    ngx_int_t     mode;
-    ngx_str_t     nonce;
-    ngx_str_t     key;
-    ngx_str_t     data_header;
-    ngx_str_t     sign_header;
+    ngx_int_t mode;
+    ngx_str_t nonce;
+    ngx_http_complex_value_t* key;
+    ngx_str_t data_header;
+    ngx_str_t sign_header;
     const EVP_MD* (*hash_function)(void);
-    ngx_uint_t    version;
-    time_t        time_window;
-    ngx_uint_t    log_level;
+    ngx_uint_t version;
+    time_t time_window;
+    ngx_uint_t log_level;
 } ngx_http_akamai_g2o_loc_conf_t;
 
 static ngx_int_t ngx_http_akamai_g2o_handler(ngx_http_request_t *r);
@@ -62,7 +62,7 @@ static ngx_command_t  ngx_http_akamai_g2o_commands[] = {
 
     { ngx_string("g2o_key"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_str_slot,
+      ngx_http_set_complex_value_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_akamai_g2o_loc_conf_t, key),
       NULL },
@@ -251,7 +251,22 @@ get_data_and_sign_from_request_headers(ngx_http_request_t *r, ngx_str_t *header_
 
 static int 
 check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *alcf) {
+    ngx_str_t key;
+
+    if (ngx_http_complex_value(
+        r,
+        alcf->key,
+        &key) != NGX_OK) {
+        return 0;
+    }
+
+    // if the key evaluates to an empty string, don't perform any validation
+    if (!key.len) {
+        return 1;
+    }
+
     ngx_str_t header_data = ngx_null_string, header_sign = ngx_null_string;
+
     get_data_and_sign_from_request_headers(r, &header_data, &header_sign);
 
     if (!header_data.data) {
@@ -263,15 +278,6 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
         ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o missing sign header");
         return 0;
     }
-
-    // for base64 we need: ceiling(32 / 3) * 4 + 1 = 45 bytes
-    // where 32 is SHA256 digest length
-    // + 1 for the string termination char
-    // lets call it 60, just in case
-    u_char signature [60];
-
-    // signature is correct
-    base64_signature_of_data(r, header_data, alcf->key, signature);
 
     u_int version, auth_time;
     ngx_str_t nonce;
@@ -306,6 +312,15 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
         ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o nonce %V incorrect", &nonce);
         return 0;
     }
+
+    // for base64 we need: ceiling(32 / 3) * 4 + 1 = 45 bytes
+    // where 32 is SHA256 digest length
+    // + 1 for the string termination char
+    // lets call it 60, just in case
+    u_char signature[60];
+
+    // signature is correct
+    base64_signature_of_data(r, header_data, key, signature);
 
     if (ngx_strncmp(header_sign.data, signature, header_sign.len)) {
         ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o signature incorrect, expected '%s' got '%V'", signature, &header_sign);
@@ -475,7 +490,10 @@ ngx_http_akamai_g2o_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_akamai_g2o_loc_conf_t  *prev = parent;
     ngx_http_akamai_g2o_loc_conf_t  *conf = child;
 	ngx_conf_merge_value(conf->mode, prev->mode, G2O_MODE_OFF);
-    ngx_conf_merge_str_value(conf->key, prev->key, "");
+    if (conf->key == NULL)
+    {
+        conf->key = prev->key;
+    }
     ngx_conf_merge_str_value(conf->nonce,prev->nonce, "");
     ngx_conf_merge_str_value(conf->data_header, prev->data_header, "X-Akamai-G2O-Auth-Data");
     ngx_conf_merge_str_value(conf->sign_header, prev->sign_header, "X-Akamai-G2O-Auth-Sign");
@@ -486,16 +504,16 @@ ngx_http_akamai_g2o_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
 	if (conf->mode != G2O_MODE_OFF)
 	{
-		if (!conf->key.data) {
+		if (!conf->key) {
 			ngx_conf_log_error(NGX_LOG_ERR, cf, 0,
 				"g2o_key not configured");
-			return 0;
+			return NGX_CONF_ERROR;
 		}
 
 		if (!conf->nonce.data) {
 			ngx_conf_log_error(NGX_LOG_ERR, cf, 0,
 				"g2o_nonce not configured");
-			return 0;
+			return NGX_CONF_ERROR;
 		}
 	}
 
