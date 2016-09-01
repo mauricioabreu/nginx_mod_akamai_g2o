@@ -32,3 +32,8 @@ Then run the tests:
     rspec
 
 Write more tests in `spec/*.rb`
+
+## Copyright & License
+
+All code in this project is released under the [BSD license](https://github.com/kaltura/nginx_mod_akamai_g2o/blob/master/LICENSE) unless a different license for a particular library is specified in the applicable library path.
+Copyright © NGINX, Tim Macfarlane, Kaltura Inc. and others. All rights reserved.
