@@ -40,7 +40,7 @@ static char *ngx_http_akamai_g2o_hash_function_command(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 static ngx_int_t ngx_http_akamai_g2o_init(ngx_conf_t *cf);
 
-static void base64_signature_of_data(ngx_http_request_t *r, ngx_str_t data, ngx_str_t key, u_char *signature);
+static ngx_int_t base64_signature_of_data(ngx_http_request_t *r, ngx_str_t data, ngx_str_t key, u_char *signature);
 static int try_get_auth_data_fields(ngx_str_t data, u_int *version, u_int *time, ngx_str_t *nonce);
 static char *ngx_http_akamai_g2o_mode_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_akamai_g2o_log_level_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -320,7 +320,9 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
     u_char signature[60];
 
     // signature is correct
-    base64_signature_of_data(r, header_data, key, signature);
+    if (base64_signature_of_data(r, header_data, key, signature) != NGX_OK) {
+        return 0;
+    }
 
     if (ngx_strncmp(header_sign.data, signature, header_sign.len)) {
         ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o signature incorrect, expected '%s' got '%V'", signature, &header_sign);
@@ -331,23 +333,39 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
     return 1;
 }
 
-static void 
+static ngx_int_t 
 base64_signature_of_data(ngx_http_request_t *r, ngx_str_t data, ngx_str_t key, u_char *signature) {
     ngx_http_akamai_g2o_loc_conf_t  *alcf;
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int md_len;
     ngx_str_t base64_dest;
     ngx_str_t base64_src;
-    HMAC_CTX hmac;
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
+    HMAC_CTX hmac_buf;
+#endif
+    HMAC_CTX* hmac;
 
     alcf = ngx_http_get_module_loc_conf(r, ngx_http_akamai_g2o_module);
 
-    HMAC_CTX_init(&hmac);
-    HMAC_Init(&hmac, key.data, key.len, alcf->hash_function());
-    HMAC_Update(&hmac, data.data, data.len);
-    HMAC_Update(&hmac, r->unparsed_uri.data, r->unparsed_uri.len);
-    HMAC_Final(&hmac, md, &md_len);
-    HMAC_CTX_cleanup(&hmac);
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+    hmac = HMAC_CTX_new();
+    if (hmac == NULL)
+    {
+        return NGX_ERROR;
+    }
+#else
+    hmac = &hmac_buf;
+    HMAC_CTX_init(hmac);
+#endif
+    HMAC_Init_ex(hmac, key.data, key.len, alcf->hash_function(), NULL);
+    HMAC_Update(hmac, data.data, data.len);
+    HMAC_Update(hmac, r->unparsed_uri.data, r->unparsed_uri.len);
+    HMAC_Final(hmac, md, &md_len);
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+    HMAC_CTX_free(hmac);
+#else
+    HMAC_CTX_cleanup(hmac);
+#endif
 
     base64_src.data = md;
     base64_src.len = md_len;
@@ -355,6 +373,8 @@ base64_signature_of_data(ngx_http_request_t *r, ngx_str_t data, ngx_str_t key, u
 
     ngx_encode_base64(&base64_dest, &base64_src);
     base64_dest.data[base64_dest.len] = '\0';
+
+    return NGX_OK;
 }
 
 static u_char* 
