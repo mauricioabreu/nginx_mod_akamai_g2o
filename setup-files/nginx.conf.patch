@@ -1,5 +1,5 @@
---- nginx-1.0.5/prefix/conf/nginx.conf.default	2011-10-30 23:29:45.000000000 +0000
-+++ nginx-1.0.5/prefix/conf/nginx.conf	2011-10-30 23:29:23.000000000 +0000
+--- nginx-1.6.1/prefix/conf/nginx.conf.default	2019-03-28 17:43:10.000000000 -0300
++++ nginx-1.6.1/prefix/conf/nginx.conf	2019-03-28 17:47:57.000000000 -0300
 @@ -1,3 +1,4 @@
 +daemon off;
  
@@ -22,7 +22,7 @@
          server_name  localhost;
  
          #charset koi8-r;
-@@ -43,6 +45,24 @@
+@@ -43,6 +45,33 @@
          location / {
              root   html;
              index  index.html index.htm;
@@ -43,6 +43,15 @@
 +                g2o        off;
 +                g2o_nonce  "token";
 +                g2o_key    "a_password";
++            }
++
++            location /using_vars {
++                set $token "token";
++                set $pass  "a_password";
++
++                g2o        on;
++                g2o_nonce  $token;
++                g2o_key    $pass;
 +            }
          }
  

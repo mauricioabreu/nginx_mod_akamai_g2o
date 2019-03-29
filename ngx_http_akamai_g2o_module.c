@@ -21,7 +21,7 @@ enum {
 
 typedef struct {
     ngx_int_t mode;
-    ngx_str_t nonce;
+    ngx_http_complex_value_t* nonce;
     ngx_http_complex_value_t* key;
     ngx_str_t data_header;
     ngx_str_t sign_header;
@@ -55,7 +55,7 @@ static ngx_command_t  ngx_http_akamai_g2o_commands[] = {
 
     { ngx_string("g2o_nonce"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_str_slot,
+      ngx_http_set_complex_value_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_akamai_g2o_loc_conf_t, nonce),
       NULL },
@@ -251,7 +251,7 @@ get_data_and_sign_from_request_headers(ngx_http_request_t *r, ngx_str_t *header_
 
 static int 
 check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *alcf) {
-    ngx_str_t key;
+    ngx_str_t key, nonce;
 
     if (ngx_http_complex_value(
         r,
@@ -262,6 +262,18 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
 
     // if the key evaluates to an empty string, don't perform any validation
     if (!key.len) {
+        return 1;
+    }
+
+    if (ngx_http_complex_value(
+        r,
+        alcf->nonce,
+        &nonce) != NGX_OK) {
+        return 0;
+    }
+
+    // if the nonce evaluates to an empty string, don't perform any validation
+    if (!nonce.len) {
         return 1;
     }
 
@@ -280,9 +292,9 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
     }
 
     u_int version, auth_time;
-    ngx_str_t nonce;
+    ngx_str_t header_nonce;
 
-    if (!try_get_auth_data_fields(header_data, &version, &auth_time, &nonce)) {
+    if (!try_get_auth_data_fields(header_data, &version, &auth_time, &header_nonce)) {
         ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o data not formatted correctly %V", &header_data);
         return 0;
     }
@@ -308,8 +320,8 @@ check_has_g2o_headers(ngx_http_request_t *r, ngx_http_akamai_g2o_loc_conf_t  *al
     }
 
     // nonce is correct
-    if (ngx_strcmp(nonce.data, alcf->nonce.data)) {
-        ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o nonce %V incorrect", &nonce);
+    if (nonce.len != header_nonce.len || ngx_memcmp(header_nonce.data, nonce.data, nonce.len)) {
+        ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o nonce %V incorrect", &header_nonce);
         return 0;
     }
 
@@ -516,7 +528,10 @@ ngx_http_akamai_g2o_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     {
         conf->key = prev->key;
     }
-    ngx_conf_merge_str_value(conf->nonce,prev->nonce, "");
+    if (conf->nonce == NULL)
+    {
+        conf->nonce = prev->nonce;
+    }
     ngx_conf_merge_str_value(conf->data_header, prev->data_header, "X-Akamai-G2O-Auth-Data");
     ngx_conf_merge_str_value(conf->sign_header, prev->sign_header, "X-Akamai-G2O-Auth-Sign");
     ngx_conf_merge_ptr_value(conf->hash_function, prev->hash_function, EVP_md5);
@@ -532,7 +547,7 @@ ngx_http_akamai_g2o_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 			return NGX_CONF_ERROR;
 		}
 
-		if (!conf->nonce.data) {
+		if (!conf->nonce) {
 			ngx_conf_log_error(NGX_LOG_ERR, cf, 0,
 				"g2o_nonce not configured");
 			return NGX_CONF_ERROR;
