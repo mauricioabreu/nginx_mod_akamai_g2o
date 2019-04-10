@@ -131,6 +131,33 @@ describe 'nginx mod' do
       end
     end
 
+    context "using variables to set token and password into the conf" do
+      before do
+        @uri = URI.parse('http://localhost:8080/using_vars/stuff.html')
+      end
+
+      it 'should allow access to content with correct G2O headers' do
+        data = g2o_data_header
+        sign = sign_data(data)
+
+        get(data, sign).should respond_with(Net::HTTPOK)
+      end
+
+      it 'should disallow access to content if using wrong token' do
+        data = g2o_data_header(:token => "wrong_token")
+        sign = sign_data(data)
+
+        get(data, sign).should respond_with(Net::HTTPForbidden)
+      end
+
+      it 'should disallow access to content if using wrong password' do
+        data = g2o_data_header
+        sign = sign_data(data, :key => "wrong_password")
+
+        get(data, sign).should respond_with(Net::HTTPForbidden)
+      end
+    end
+
     it 'should disallow access to content without G2O headers' do
       get.should respond_with(Net::HTTPForbidden)
     end
